@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Drift: Cubicle Chaos</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #eef4ff, #dfe8f5);
+      color: #1f2a37;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    h1 {
+      margin: 8px 0 4px;
+      font-size: 2rem;
+    }
+    .subtitle {
+      margin-bottom: 12px;
+      text-align: center;
+      max-width: 900px;
+    }
+    .hud {
+      width: 920px;
+      max-width: 100%;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .card {
+      background: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.65;
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+    .game-wrap {
+      position: relative;
+      width: 920px;
+      max-width: 100%;
+    }
+    canvas {
+      width: 100%;
+      max-width: 920px;
+      height: auto;
+      display: block;
+      background: #9ac27a;
+      border-radius: 18px;
+      box-shadow: 0 14px 30px rgba(0,0,0,0.18);
+      border: 3px solid rgba(255,255,255,0.65);
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .message {
+      background: rgba(15, 23, 42, 0.78);
+      color: white;
+      padding: 18px 22px;
+      border-radius: 18px;
+      text-align: center;
+      max-width: 80%;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+    }
+    .controls {
+      width: 920px;
+      max-width: 100%;
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 10px;
+    }
+    .controls p {
+      margin: 6px 0;
+      line-height: 1.35;
+    }
+    button {
+      background: #1d4ed8;
+      color: white;
+      border: none;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      box-shadow: 0 8px 20px rgba(29, 78, 216, 0.25);
+    }
+    button:hover { filter: brightness(1.05); }
+    @media (max-width: 760px) {
+      .hud, .controls {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Office Drift: Cubicle Chaos</h1>
+  <div class="subtitle">Drift your tiny office chair racer around the cubicle loop, dodge coffee spills and printers, and collect donuts for bonus points. Extremely professional behavior.</div>
+
+  <div class="hud">
+    <div class="card"><div class="label">Score</div><div id="score" class="value">0</div></div>
+    <div class="card"><div class="label">Best Drift</div><div id="drift" class="value">0</div></div>
+    <div class="card"><div class="label">Speed</div><div id="speed" class="value">0</div></div>
+    <div class="card"><div class="label">Status</div><div id="status" class="value">Ready</div></div>
+  </div>
+
+  <div class="game-wrap">
+    <canvas id="game" width="920" height="560"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="message" id="message">
+        <h2 style="margin-top:0">Press Space to Start</h2>
+        <div>Arrow keys or WASD to drive. Drift hard, avoid HR paperwork.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="card">
+      <p><strong>Controls:</strong> W/↑ accelerate, S/↓ brake, A/D or ←/→ steer, Space restart.</p>
+      <p><strong>Goal:</strong> Stay on the carpet track, chain drifts, grab donuts, and do not plow into the giant printer.</p>
+    </div>
+    <div class="card"><button id="restartBtn">Restart Game</button></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const message = document.getElementById('message');
+    const scoreEl = document.getElementById('score');
+    const driftEl = document.getElementById('drift');
+    const speedEl = document.getElementById('speed');
+    const statusEl = document.getElementById('status');
+    const restartBtn = document.getElementById('restartBtn');
+
+    const keys = {};
+    let running = false;
+    let gameOver = false;
+    let score = 0;
+    let bestDrift = 0;
+    let frame = 0;
+
+    const center = { x: canvas.width / 2, y: canvas.height / 2 };
+    const outer = { x: 360, y: 220 };
+    const inner = { x: 210, y: 90 };
+
+    const car = {
+      x: center.x,
+      y: center.y + 155,
+      angle: -Math.PI / 2,
+      velocity: 0,
+      width: 34,
+      height: 20,
+      driftChain: 0,
+      lastSlip: 0,
+    };
+
+    let obstacles = [];
+    let donuts = [];
+    let confetti = [];
+
+    function resetGame() {
+      running = false;
+      gameOver = false;
+      score = 0;
+      bestDrift = 0;
+      frame = 0;
+      car.x = center.x;
+      car.y = center.y + 155;
+      car.angle = -Math.PI / 2;
+      car.velocity = 0;
+      car.driftChain = 0;
+      car.lastSlip = 0;
+      obstacles = [
+        { x: center.x - 290, y: center.y - 35, w: 42, h: 42, type: 'printer' },
+        { x: center.x + 255, y: center.y + 40, w: 52, h: 22, type: 'coffee' },
+        { x: center.x - 50, y: center.y - 185, w: 44, h: 30, type: 'meeting' },
+        { x: center.x + 70, y: center.y + 175, w: 40, h: 40, type: 'plant' },
+      ];
+      donuts = [
+        spawnDonut(0), spawnDonut(Math.PI / 2), spawnDonut(Math.PI), spawnDonut(Math.PI * 1.5)
+      ];
+      confetti = [];
+      updateHud();
+      overlay.style.display = 'flex';
+      message.innerHTML = '<h2 style="margin-top:0">Press Space to Start</h2><div>Arrow keys or WASD to drive. Drift hard, avoid HR paperwork.</div>';
+      statusEl.textContent = 'Ready';
+    }
+
+    function spawnDonut(angle) {
+      const radiusX = (outer.x + inner.x) / 2 + (Math.random() * 30 - 15);
+      const radiusY = (outer.y + inner.y) / 2 + (Math.random() * 24 - 12);
+      return {
+        angle,
+        x: center.x + Math.cos(angle) * radiusX,
+        y: center.y + Math.sin(angle) * radiusY,
+        r: 10,
+      };
+    }
+
+    function startGame() {
+      if (!running) {
+        running = true;
+        gameOver = false;
+        overlay.style.display = 'none';
+        statusEl.textContent = 'Drifting';
+      }
+    }
+
+    function endGame(reason) {
+      running = false;
+      gameOver = true;
+      overlay.style.display = 'flex';
+      message.innerHTML = `<h2 style="margin-top:0">${reason}</h2><div>Final score: <strong>${Math.floor(score)}</strong><br>Press Space to try another highly productive lap.</div>`;
+      statusEl.textContent = 'Crashed';
+    }
+
+    function updateHud() {
+      scoreEl.textContent = Math.floor(score);
+      driftEl.textContent = Math.floor(bestDrift);
+      speedEl.textContent = Math.abs(car.velocity * 12).toFixed(0);
+    }
+
+    function onTrack(x, y) {
+      const dx = x - center.x;
+      const dy = y - center.y;
+      const outerVal = (dx * dx) / (outer.x * outer.x) + (dy * dy) / (outer.y * outer.y);
+      const innerVal = (dx * dx) / (inner.x * inner.x) + (dy * dy) / (inner.y * inner.y);
+      return outerVal <= 1 && innerVal >= 1;
+    }
+
+    function collideRectCircle(rect, cx, cy, radius) {
+      const testX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+      const testY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+      const dx = cx - testX;
+      const dy = cy - testY;
+      return dx * dx + dy * dy <= radius * radius;
+    }
+
+    function update() {
+      frame++;
+      if (running) {
+        const accel = (keys['ArrowUp'] || keys['w']) ? 0.19 : 0;
+        const brake = (keys['ArrowDown'] || keys['s']) ? 0.12 : 0;
+        const steer = (keys['ArrowLeft'] || keys['a'] ? -1 : 0) + (keys['ArrowRight'] || keys['d'] ? 1 : 0);
+
+        car.velocity += accel;
+        car.velocity -= brake;
+        car.velocity *= 0.985;
+        car.velocity = Math.max(-2.4, Math.min(4.8, car.velocity));
+
+        const turningPower = 0.04 * Math.min(Math.abs(car.velocity) + 0.3, 3);
+        car.angle += steer * turningPower;
+
+        const slip = Math.abs(steer) * Math.abs(car.velocity);
+        car.lastSlip = slip;
+        if (slip > 1.7 && Math.abs(car.velocity) > 1.9) {
+          car.driftChain += slip * 0.7;
+          score += 0.45 * slip;
+          bestDrift = Math.max(bestDrift, car.driftChain);
+          if (frame % 3 === 0) {
+            confetti.push({ x: car.x, y: car.y, life: 18, vx: Math.random() * 2 - 1, vy: Math.random() * 2 - 1 });
+          }
+        } else {
+          car.driftChain *= 0.96;
+        }
+
+        car.x += Math.cos(car.angle) * car.velocity;
+        car.y += Math.sin(car.angle) * car.velocity;
+        score += Math.abs(car.velocity) * 0.08;
+
+        if (!onTrack(car.x, car.y)) {
+          endGame('You drifted into the breakroom.');
+        }
+
+        for (const obs of obstacles) {
+          if (collideRectCircle(obs, car.x, car.y, 14)) {
+            const reasonMap = {
+              printer: 'You destroyed the giant printer.',
+              coffee: 'Coffee spill. Traction has left the chat.',
+              meeting: 'You were captured by an unexpected meeting.',
+              plant: 'You bullied the office plant.'
+            };
+            endGame(reasonMap[obs.type] || 'Office impact detected.');
+          }
+        }
+
+        donuts.forEach((d, i) => {
+          const dx = d.x - car.x;
+          const dy = d.y - car.y;
+          if (dx * dx + dy * dy < 22 * 22) {
+            score += 50;
+            confetti.push({ x: d.x, y: d.y, life: 30, vx: 0, vy: -1 });
+            donuts[i] = spawnDonut(Math.random() * Math.PI * 2);
+            statusEl.textContent = 'Donut secured';
+          }
+        });
+
+        if (Math.abs(car.velocity) < 0.2 && frame % 90 === 0) {
+          statusEl.textContent = 'Too calm for a drift legend';
+        } else if (car.lastSlip > 1.8) {
+          statusEl.textContent = 'Certified hallway menace';
+        } else if (running) {
+          statusEl.textContent = 'Drifting';
+        }
+      }
+
+      confetti = confetti.filter(p => p.life-- > 0);
+      confetti.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+      });
+
+      updateHud();
+    }
+
+    function drawTrack() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#b9d79f';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#6f7d8c';
+      ctx.beginPath();
+      ctx.ellipse(center.x, center.y, outer.x, outer.y, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#c7d7b6';
+      ctx.beginPath();
+      ctx.ellipse(center.x, center.y, inner.x, inner.y, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([14, 14]);
+      ctx.beginPath();
+      ctx.ellipse(center.x, center.y, (outer.x + inner.x) / 2, (outer.y + inner.y) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      drawCubicles();
+    }
+
+    function drawCubicles() {
+      const cubicles = [
+        { x: 35, y: 40 }, { x: 115, y: 40 }, { x: 195, y: 40 },
+        { x: 35, y: 460 }, { x: 115, y: 460 }, { x: 195, y: 460 },
+        { x: 690, y: 40 }, { x: 770, y: 40 }, { x: 850, y: 40 },
+        { x: 690, y: 460 }, { x: 770, y: 460 }, { x: 850, y: 460 }
+      ];
+      cubicles.forEach(c => {
+        ctx.fillStyle = '#d9c9a3';
+        ctx.fillRect(c.x, c.y, 55, 36);
+        ctx.fillStyle = '#8f7853';
+        ctx.fillRect(c.x, c.y, 55, 6);
+      });
+    }
+
+    function drawObstacles() {
+      obstacles.forEach(obs => {
+        if (obs.type === 'printer') {
+          ctx.fillStyle = '#2f3947';
+          ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+          ctx.fillStyle = '#d7dee8';
+          ctx.fillRect(obs.x + 8, obs.y + 8, 26, 10);
+        } else if (obs.type === 'coffee') {
+          ctx.fillStyle = '#5b3715';
+          ctx.beginPath();
+          ctx.ellipse(obs.x + obs.w / 2, obs.y + obs.h / 2, 28, 14, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (obs.type === 'meeting') {
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px Arial';
+          ctx.fillText('MEETING', obs.x + 3, obs.y + 19);
+        } else if (obs.type === 'plant') {
+          ctx.fillStyle = '#8b5a2b';
+          ctx.fillRect(obs.x + 12, obs.y + 22, 16, 16);
+          ctx.fillStyle = '#2f9e44';
+          ctx.beginPath();
+          ctx.arc(obs.x + 20, obs.y + 18, 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
+
+    function drawDonuts() {
+      donuts.forEach(d => {
+        ctx.fillStyle = '#d89b5a';
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#7c4a1d';
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f7c7de';
+        ctx.beginPath();
+        ctx.arc(d.x - 2, d.y - 2, 6, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function drawCar() {
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+
+      if (car.lastSlip > 1.6 && running) {
+        ctx.fillStyle = 'rgba(80,80,80,0.25)';
+        ctx.fillRect(-24, -10, 10, 20);
+        ctx.fillRect(14, -10, 10, 20);
+      }
+
+      ctx.fillStyle = '#2563eb';
+      ctx.fillRect(-car.width / 2, -car.height / 2, car.width, car.height);
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(-8, -7, 16, 14);
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(car.width / 2 - 4, -6, 4, 5);
+      ctx.fillRect(car.width / 2 - 4, 1, 4, 5);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-15, -12, 6, 4);
+      ctx.fillRect(9, -12, 6, 4);
+      ctx.fillRect(-15, 8, 6, 4);
+      ctx.fillRect(9, 8, 6, 4);
+
+      ctx.restore();
+    }
+
+    function drawConfetti() {
+      confetti.forEach(p => {
+        ctx.fillStyle = p.life % 2 === 0 ? '#fde047' : '#60a5fa';
+        ctx.fillRect(p.x, p.y, 4, 4);
+      });
+    }
+
+    function render() {
+      drawTrack();
+      drawDonuts();
+      drawObstacles();
+      drawConfetti();
+      drawCar();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      ctx.font = 'bold 18px Arial';
+      ctx.fillText('Cubicle Loop', 24, 32);
+    }
+
+    function loop() {
+      update();
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      keys[key] = true;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (gameOver) {
+          resetGame();
+          startGame();
+        } else if (!running) {
+          startGame();
+        }
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      keys[key] = false;
+    });
+
+    restartBtn.addEventListener('click', () => {
+      resetGame();
+      startGame();
+    });
+
+    resetGame();
+    loop();
+  </script>
+</body>
+</html>
